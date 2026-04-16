@@ -11,7 +11,34 @@ const defaultModel =
   process.env.OPENAI_DEFAULT_MODEL ||
   import.meta.env.VITE_OPENAI_DEFAULT_MODEL ||
   "gpt-5.4";
+const ACCESS_KEY_STORAGE_KEY = "ai-taoist-access-key";
 const HTML_RESPONSE_PATTERN = /<!doctype html|<html[\s>]|<head[\s>]|<body[\s>]/i;
+
+function getAccessKey(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(ACCESS_KEY_STORAGE_KEY) || "";
+}
+
+export function setAccessKey(value: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, normalized);
+}
+
+export function getStoredAccessKey(): string {
+  return getAccessKey();
+}
 
 // Global model config defaults to gpt-5.4.
 const Type = {
@@ -618,6 +645,7 @@ async function requestFortuneOutputText({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-access-key": getAccessKey(),
     },
     signal,
     body: JSON.stringify({

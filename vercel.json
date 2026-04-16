@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60,
+      "regions": ["hkg1"]
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/models",
+      "destination": "/api?endpoint=models"
+    },
+    {
+      "source": "/api/fortune",
+      "destination": "/api?endpoint=fortune"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

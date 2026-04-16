@@ -23,7 +23,9 @@ import {
   LiuYaoResult as ILiuYaoResult,
   CompatibilityResult as ICompatibilityResult,
   setModel,
-  getModel
+  getModel,
+  setAccessKey,
+  getStoredAccessKey
 } from './services/fortuneService';
 import { motion, AnimatePresence } from 'motion/react';
 import { HelpCircle, Cpu } from 'lucide-react';
@@ -112,6 +114,11 @@ export default function App() {
   // Model State
   const [selectedModel, setSelectedModel] = useState(() => getModel() || PREFERRED_DEFAULT_MODEL);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>(FALLBACK_MODEL_OPTIONS);
+  const [accessKeyInput, setAccessKeyInput] = useState(() => getStoredAccessKey());
+  const [isAccessGranted, setIsAccessGranted] = useState(false);
+  const [isAccessReady, setIsAccessReady] = useState(false);
+  const [accessKeyError, setAccessKeyError] = useState<string | null>(null);
+  const [isAccessChecking, setIsAccessChecking] = useState(false);
 
   // Bazi State
   const [baziLoading, setBaziLoading] = useState(false);
@@ -148,11 +155,27 @@ export default function App() {
 
     const loadModels = async () => {
       try {
-        const response = await fetch('/api/models');
+        const storedAccessKey = getStoredAccessKey();
+        const response = await fetch('/api/models', {
+          headers: storedAccessKey
+            ? {
+                'x-access-key': storedAccessKey,
+              }
+            : {},
+        });
         const rawPayload = await response.text();
         const payload = parseJsonSafely<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(rawPayload);
 
         if (!response.ok) {
+          if (response.status === 401) {
+            setAccessKey('');
+            if (!cancelled) {
+              setIsAccessGranted(false);
+              setAccessKeyError(extractKeyErrorMessage(rawPayload, '访问密钥校验失败', response.status));
+            }
+            return;
+          }
+
           throw new Error(extractKeyErrorMessage(rawPayload, '模型列表加载失败，请稍后再试。', response.status));
         }
 
@@ -174,6 +197,8 @@ export default function App() {
           setModelOptions(nextOptions);
           setSelectedModel(nextSelectedModel);
           setModel(nextSelectedModel);
+          setIsAccessGranted(true);
+          setAccessKeyError(null);
         }
       } catch (error) {
         console.error('Failed to load model list:', error);
@@ -186,6 +211,12 @@ export default function App() {
           const nextSelectedModel = pickPreferredModel(fallbackOptions);
           setSelectedModel(nextSelectedModel);
           setModel(nextSelectedModel);
+          setIsAccessGranted(true);
+          setAccessKeyError(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAccessReady(true);
         }
       }
     };
@@ -196,6 +227,41 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  const handleAccessSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = accessKeyInput.trim();
+
+    if (!normalized) {
+      setAccessKeyError('请输入访问密钥');
+      return;
+    }
+
+    setIsAccessChecking(true);
+    setAccessKeyError(null);
+    setAccessKey(normalized);
+
+    try {
+      const response = await fetch('/api/models', {
+        headers: {
+          'x-access-key': normalized,
+        },
+      });
+      const rawPayload = await response.text();
+
+      if (!response.ok) {
+        throw new Error(extractKeyErrorMessage(rawPayload, '访问密钥校验失败', response.status));
+      }
+
+      setIsAccessGranted(true);
+    } catch (error) {
+      setAccessKey('');
+      setIsAccessGranted(false);
+      setAccessKeyError(error instanceof Error ? error.message : '访问密钥校验失败');
+    } finally {
+      setIsAccessChecking(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -528,6 +594,44 @@ export default function App() {
       </div>
 
       <HelpFAQ isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+      <AnimatePresence>
+        {isAccessReady && !isAccessGranted && (
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-white/18 px-4 backdrop-blur-md"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.form
+              onSubmit={handleAccessSubmit}
+              className="w-full max-w-md rounded-3xl border border-white/70 bg-white/92 p-6 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.22)] backdrop-blur-xl"
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            >
+              <h2 className="text-xl font-semibold text-slate-900">请输入访问密钥</h2>
+              <p className="mt-2 text-sm text-slate-600">验证通过后才可继续访问与调用接口</p>
+              <input
+                type="password"
+                value={accessKeyInput}
+                onChange={(event) => setAccessKeyInput(event.target.value)}
+                className="mt-5 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                placeholder="请输入访问密钥"
+                autoFocus
+              />
+              {accessKeyError && <p className="mt-3 text-sm text-rose-500">{accessKeyError}</p>}
+              <button
+                type="submit"
+                disabled={isAccessChecking}
+                className="mt-5 w-full rounded-2xl bg-slate-900 px-4 py-3 font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isAccessChecking ? '验证中...' : '确认进入'}
+              </button>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
